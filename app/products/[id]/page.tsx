@@ -2,10 +2,14 @@ import FavoriteToggleButton from "@/components/products/FavoriteToggleButton";
 import AddToCart from "@/components/single-product/AddToCart";
 import BreadCrumbs from "@/components/single-product/BreadCrumbs";
 import ProductRating from "@/components/single-product/ProductRating";
-import { fetchSingleProduct } from "@/utils/actions";
+import ShareButton from "@/components/single-product/ShareButton";
+import { fetchSingleProduct, findExistingReview } from "@/utils/actions";
 import { formatCurrency } from "@/utils/format";
 import { Product } from "@prisma/client";
 import Image from "next/image";
+import SubmitReview from "@/components/reviews/SubmitReview";
+import ProductReviews from "@/components/reviews/ProductReviews";
+import { auth } from "@clerk/nextjs/server";
 
 async function SingleProductPage({
   params,
@@ -16,6 +20,9 @@ async function SingleProductPage({
   const product = (await fetchSingleProduct(parameters.id)) as Product;
   const { name, image, company, description, price } = product;
   const dollarsAmount = formatCurrency(price);
+  const { userId } = await auth();
+  const reviewExists =
+    userId && !(await findExistingReview(product.id, userId));
   return (
     <section>
       <BreadCrumbs name={product.name} />
@@ -36,6 +43,7 @@ async function SingleProductPage({
           <div className="flex gap-x-8 items-center">
             <h1 className="capitalize text-3xl font-bold">{name}</h1>
             <FavoriteToggleButton productId={parameters.id} />
+            <ShareButton name={product.name} productId={parameters.id} />
           </div>
           <ProductRating productId={parameters.id} />
           <h4 className="text-xl mt-2">{company}</h4>
@@ -46,6 +54,8 @@ async function SingleProductPage({
           <AddToCart productId={parameters.id} />
         </div>
       </div>
+      <ProductReviews productId={parameters.id} />
+      {reviewExists && <SubmitReview productId={parameters.id} />}
     </section>
   );
 }
