@@ -1,6 +1,6 @@
 "use server";
 import db from "@/utils/db";
-import { currentUser } from "@clerk/nextjs/server";
+import { auth, currentUser, getAuth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import {
   imageSchema,
@@ -11,6 +11,8 @@ import {
 import { deleteImage, uploadImage } from "./supabase";
 import { revalidatePath } from "next/cache";
 import { useAuth } from "@clerk/nextjs";
+import { boolean, unknown } from "zod";
+import { Cart } from "@prisma/client";
 
 export const fetchFeaturedProducts = async () => {
   const products = await db.product.findMany({
@@ -273,17 +275,17 @@ export const fetchProductReviews = async (productId: string) => {
 };
 export const fetchProductRating = async (productId: string) => {
   const result = await db.review.groupBy({
-    by: ['productId'],
+    by: ["productId"],
     _avg: {
-      rating: true
+      rating: true,
     },
     _count: {
-      rating: true
+      rating: true,
     },
     where: {
       productId,
-    }
-  })
+    },
+  });
   return {
     rating: result[0]?._avg?.rating ?? 0,
     count: result[0]?._count?.rating ?? 0,
@@ -293,7 +295,7 @@ export const fetchProductReviewsByUser = async () => {
   const user = getAuthUser();
   const reviews = await db.review.findMany({
     where: {
-      clerkId: (await user).id
+      clerkId: (await user).id,
     },
     select: {
       id: true,
@@ -303,13 +305,13 @@ export const fetchProductReviewsByUser = async () => {
         select: {
           name: true,
           image: true,
-        }
-      }
-    }
-  })
+        },
+      },
+    },
+  });
   return reviews;
 };
-export const deleteReviewAction = async (prevState: {reviewId : string}) => {
+export const deleteReviewAction = async (prevState: { reviewId: string }) => {
   const user = getAuthUser();
   const { reviewId } = prevState;
   try {
@@ -317,19 +319,279 @@ export const deleteReviewAction = async (prevState: {reviewId : string}) => {
       where: {
         clerkId: (await user).id,
         id: reviewId,
-      }
-    })
-    revalidatePath('/reviews');
-    return { message: "Review deleted successfully" }
+      },
+    });
+    revalidatePath("/reviews");
+    return { message: "Review deleted successfully" };
   } catch (error) {
     return renderError(error);
   }
 };
 export const findExistingReview = async (productId: string, userId: string) => {
   return db.review.findFirst({
-    where:{
+    where: {
       clerkId: userId,
       productId,
-    }
-  }) 
+    },
+  });
 };
+
+export const fetchCartItems = async () => {
+  const { userId } = await auth();
+  const cart = await db.cart.findFirst({
+    where: {
+      clerkId: userId ?? "",
+    },
+    select: {
+      numOfItemsInCart: true,
+    },
+  });
+  return cart?.numOfItemsInCart || 0;
+};
+
+const fetchProduct = async (productId: string) => {
+  const product = await db.product.findUnique({
+    where: {
+      id: productId,
+    },
+  });
+  if (!product) throw new Error("Product not found");
+  return product;
+};
+
+const includeProductClause = { cartItems: { include: { product: true } } };
+
+export const fetchOrCreateCart = async ({
+  userId,
+  errorOnFailure = false,
+}: {
+  userId: string;
+  errorOnFailure?: boolean;
+}) => {
+  let cart = await db.cart.findFirst({
+    where: {
+      clerkId: userId,
+    },
+    include: includeProductClause,
+  });
+  if (errorOnFailure && !cart) {
+    throw new Error("Cart not found");
+  }
+  if (!cart) {
+    cart = await db.cart.create({
+      data: {
+        clerkId: userId,
+      },
+      include: includeProductClause,
+    });
+  }
+  return cart;
+};
+
+const updateOrCreateCartItem = async ({
+  productId,
+  cartId,
+  amount,
+}: {
+  productId: string;
+  cartId: string;
+  amount: number;
+}) => {
+  let cartItem = await db.cartItem.findFirst({
+    where: {
+      productId,
+      cartId,
+    },
+  });
+  if (cartItem) {
+    cartItem = await db.cartItem.update({
+      data: {
+        amount: cartItem.amount + amount,
+      },
+      where: {
+        id: cartItem.id,
+      },
+    });
+  } else {
+    cartItem = await db.cartItem.create({
+      data: {
+        productId,
+        cartId,
+        amount,
+      },
+    });
+  }
+  return cartItem;
+};
+
+export const updateCart = async (cart: Cart) => {
+  const cartItems = await db.cartItem.findMany({
+    where: {
+      cartId: cart.id,
+    },
+    include: {
+      product: true,
+    },
+    orderBy: {
+      createdAt: "asc",
+    },
+  });
+
+  let numOfItemsInCart = 0;
+  let cartTotal = 0;
+
+  for (const item of cartItems) {
+    numOfItemsInCart += item.amount;
+    cartTotal += item.amount * item.product.price;
+  }
+  const tax = cart.taxRate * cartTotal;
+  const shipping = cartTotal ? cart.shipping : 0;
+  const orderTotal = cartTotal + shipping + tax;
+
+  const currentCart = await db.cart.update({
+    data: {
+      numOfItemsInCart,
+      tax,
+      cartTotal,
+      orderTotal,
+    },
+    where: {
+      id: cart.id,
+    },
+    include: includeProductClause,
+  });
+  return { currentCart, cartItems };
+};
+
+export const addToCartAction = async (
+  prevState: unknown,
+  formData: FormData
+) => {
+  const user = await getAuthUser();
+  try {
+    const productId = formData.get("productId") as string;
+    const amount = Number(formData.get("amount"));
+    await fetchProduct(productId);
+    const cart = await fetchOrCreateCart({ userId: user.id });
+    await updateOrCreateCartItem({ productId, cartId: cart.id, amount });
+    await updateCart(cart);
+    return { message: "product added to cart" };
+  } catch (error) {
+    return renderError(error);
+  }
+};
+
+export const removeCartItemAction = async (
+  prevState: unknown,
+  formData: FormData
+) => {
+  const user = await getAuthUser();
+  try {
+    const cartItemId = formData.get("id") as string;
+    const cart = await fetchOrCreateCart({
+      userId: user.id,
+      errorOnFailure: true,
+    });
+    await db.cartItem.delete({
+      where: {
+        id: cartItemId,
+        cartId: cart.id,
+      },
+    });
+    await updateCart(cart);
+    await revalidatePath("/cart");
+    return { message: "Item removed from cart" };
+  } catch (error) {
+    return renderError(error);
+  }
+};
+
+export const updateCartItemAction = async ({
+  cartItemId,
+  amount,
+}: {
+  cartItemId: string;
+  amount: number;
+}) => {
+  const user = await getAuthUser();
+  try {
+    const cart = await fetchOrCreateCart({
+      userId: user.id,
+      errorOnFailure: true,
+    });
+    await db.cartItem.update({
+      where: {
+        id: cartItemId,
+        cartId: cart.id,
+      },
+      data: {
+        amount,
+      },
+    });
+    await updateCart(cart);
+    revalidatePath("/cart");
+    return { message: "cart updated" };
+  } catch (error) {
+    return renderError(error);
+  }
+};
+
+export const createOrderAction = async (
+  prevState: unknown,
+  formData: FormData
+) => {
+  const user = await getAuthUser();
+  let orderId: string | null = null;
+  let cartId: string | null = null;
+  try {
+    const cart = await fetchOrCreateCart({ userId: user.id, errorOnFailure: true });
+    cartId = cart.id;
+    await db.order.deleteMany({
+      where: {
+        clerkId: user.id,
+        isPaid: false,
+      }
+    })
+    const order = await db.order.create({
+      data: {
+        clerkId: user.id,
+        products: cart.numOfItemsInCart,
+        orderTotal: cart.orderTotal,
+        tax: cart.tax,
+        shipping: cart.shipping,
+        email: user.emailAddresses[0].emailAddress,
+      }
+    });
+    orderId = order.id;
+  } catch (error) {
+    return renderError(error);
+  }
+  redirect(`/checkout?orderId=${orderId}&cartId=${cartId}`);
+};
+
+export const fetchUserOrders = async () => {
+  const user = await getAuthUser();
+  const orders = await db.order.findMany({
+    where: {
+      clerkId: user.id,
+      isPaid: true
+    },
+    orderBy: {
+      createdAt: 'desc'
+    }
+  });
+  return orders;
+}
+
+export const fetchAdminOrders = async () => {
+  const admin = await getAdminUser();
+  const orders = await db.order.findMany({
+    where: {
+      isPaid: true
+    },
+    orderBy: {
+      createdAt: 'desc',
+    }
+  });
+  return orders;
+}
