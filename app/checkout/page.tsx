@@ -7,7 +7,6 @@ import {
   EmbeddedCheckoutProvider,
   EmbeddedCheckout,
 } from "@stripe/react-stripe-js";
-import { Divide } from "lucide-react";
 
 const stripePromise = loadStripe(
   process.env.NEXT_PUBLIC_PUBLISHABLE_KEY as string
