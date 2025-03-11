@@ -2,7 +2,7 @@
 import axios from "axios";
 import { loadStripe } from "@stripe/stripe-js";
 import { useSearchParams } from "next/navigation";
-import React, { Suspense, useCallback } from "react";
+import React, { useCallback } from "react";
 import {
   EmbeddedCheckoutProvider,
   EmbeddedCheckout,
@@ -12,7 +12,7 @@ const stripePromise = loadStripe(
   process.env.NEXT_PUBLIC_PUBLISHABLE_KEY as string
 );
 
-function CheckoutContent() {
+export default function CheckoutPage() {
   const searchParams = useSearchParams();
 
   const orderId = searchParams.get("orderId");
@@ -37,10 +37,10 @@ function CheckoutContent() {
   );
 }
 
-export default function CheckoutPage() {
-  return (
-    <Suspense fallback={<div>Loading...</div>}>
-      <CheckoutContent />
-    </Suspense>
-  )
-}
+// export default function CheckoutPage() {
+//   return (
+//     <Suspense fallback={<div>Loading...</div>}>
+//       <CheckoutContent />
+//     </Suspense>
+//   )
+// }
