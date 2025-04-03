@@ -4,11 +4,16 @@ import Image from "next/image";
 
 function Logo() {
   return (
-      <Link href="/">
-        <Image src={logo} alt="logo" className="w-full h-11 object-cover" />
-        {/* <VscCode className='w-6 h-6' /> */}
-      </Link>
-  )
+    <Link href="/" className="block w-[150px]">
+      <Image
+        src={logo}
+        alt="logo"
+        className="w-full h-auto object-contain"
+        priority
+      />
+      {/* <VscCode className='w-6 h-6' /> */}
+    </Link>
+  );
 }
 
-export default Logo
+export default Logo;
