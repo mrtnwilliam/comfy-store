@@ -2,7 +2,7 @@
 import axios from "axios";
 import { loadStripe } from "@stripe/stripe-js";
 import { useSearchParams } from "next/navigation";
-import React, { useCallback, useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import {
   EmbeddedCheckoutProvider,
   EmbeddedCheckout,
@@ -12,7 +12,7 @@ const stripePromise = loadStripe(
   process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY as string
 );
 
-export default function CheckoutPage() {
+function CheckoutContent() {
   const searchParams = useSearchParams();
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +59,7 @@ export default function CheckoutPage() {
   }
 
   return (
-    <div className="w-full h-[calc(100vh-64px)]"> {/* Adjust height as needed */}
+    <div className="w-full h-[calc(100vh-64px)]">
       <EmbeddedCheckoutProvider
         stripe={stripePromise}
         options={{ clientSecret }}
@@ -67,5 +67,13 @@ export default function CheckoutPage() {
         <EmbeddedCheckout />
       </EmbeddedCheckoutProvider>
     </div>
+  );
+}
+
+export default function CheckoutPage() {
+  return (
+    <Suspense fallback={<div className="flex justify-center items-center h-screen">Loading...</div>}>
+      <CheckoutContent />
+    </Suspense>
   );
 }
