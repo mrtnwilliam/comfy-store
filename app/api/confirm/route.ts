@@ -15,10 +15,8 @@ export const GET = async (req: Request) => {
   }
 
   try {
-    // 1. Retrieve the Stripe session
     const session = await stripe.checkout.sessions.retrieve(session_id);
-    console.log('Stripe session:', session);
-
+    
     if (!session.metadata?.orderId || !session.metadata?.cartId) {
       return NextResponse.json(
         { error: 'Missing metadata in session' },
@@ -28,27 +26,23 @@ export const GET = async (req: Request) => {
 
     const { orderId, cartId } = session.metadata;
 
-    // 2. Verify payment is complete
     if (session.payment_status === 'paid') {
-      console.log('Updating order:', orderId);
-      
-      // 3. Update order status
-      const updatedOrder = await db.order.update({
-        where: { id: orderId },
-        data: { isPaid: true },
+      // 1. First delete all cart items
+      await db.cartItem.deleteMany({
+        where: { cartId: cartId }
       });
 
-      console.log('Order updated:', updatedOrder);
+      // 2. Then delete the cart
+      await db.cart.delete({
+        where: { id: cartId }
+      });
 
-      // 4. Delete cart
-      if (cartId) {
-        console.log('Deleting cart:', cartId);
-        await db.cart.delete({
-          where: { id: cartId },
-        });
-      }
+      // 3. Update the order status
+      await db.order.update({
+        where: { id: orderId },
+        data: { isPaid: true }
+      });
 
-      // 5. Redirect to success page
       return NextResponse.redirect(new URL('/orders', req.url));
     }
 
@@ -60,7 +54,10 @@ export const GET = async (req: Request) => {
   } catch (error) {
     console.error('Confirmation error:', error);
     return NextResponse.json(
-      { error: 'Internal Server Error', details: error instanceof Error ? error.message : String(error) },
+      { 
+        error: 'Internal Server Error', 
+        details: error instanceof Error ? error.message : String(error) 
+      },
       { status: 500 }
     );
   }
